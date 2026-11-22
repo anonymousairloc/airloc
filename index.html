@@ -1,0 +1,824 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AirLoc: Interactive Simulation</title>
+<style>
+/* Layout: floor plan on the left as the working surface, a readout column on the right. No external resources are loaded. */
+:root{
+  --bg:#EDF1F0; --panel:#F8FAF9; --ink:#16202A; --muted:#5A6670; --line:#CBD3D2;
+  --floor:#FBFCFB; --grid:#E2E8E6; --wall:#27323C; --furn:#DCE3E0;
+  --accent:#C2410C; --accent-soft:rgba(194,65,12,.14);
+  --fixed:#1F4FBF; --lm:#7B3FB5; --good:#2F7D4F; --warn:#A16207;
+  --font-ui:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --font-data:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+}
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){
+  --bg:#0F151A; --panel:#151D24; --ink:#E3E9ED; --muted:#93A1AC; --line:#29343D;
+  --floor:#121A20; --grid:#1C272F; --wall:#B3C0CA; --furn:#22303A;
+  --accent:#F27A3D; --accent-soft:rgba(242,122,61,.18);
+  --fixed:#7AA2FF; --lm:#BC8DF2; --good:#5FBF86; --warn:#E0B04A; color-scheme:dark }}
+:root[data-theme="dark"]{
+  --bg:#0F151A; --panel:#151D24; --ink:#E3E9ED; --muted:#93A1AC; --line:#29343D;
+  --floor:#121A20; --grid:#1C272F; --wall:#B3C0CA; --furn:#22303A;
+  --accent:#F27A3D; --accent-soft:rgba(242,122,61,.18);
+  --fixed:#7AA2FF; --lm:#BC8DF2; --good:#5FBF86; --warn:#E0B04A; color-scheme:dark }
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{background:var(--bg);color:var(--ink);font-family:var(--font-ui);font-size:14px;line-height:1.45;margin:0;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:14px 28px}
+.top{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:12px;max-width:1360px;margin:0 auto 10px}
+.brand{display:flex;flex-direction:column;gap:2px}
+.brand .name{font-weight:700;font-size:22px;letter-spacing:.01em}
+.brand .sub{color:var(--muted);font-size:13px}
+.simnote{max-width:1360px;margin:0 auto 14px;border:1px solid var(--warn);border-radius:8px;padding:8px 12px;font-size:13px;background:var(--panel)}
+.simnote b{color:var(--warn)}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--panel)}
+.seg button{font:inherit;font-weight:600;font-size:15px;letter-spacing:.02em;padding:8px 18px;border:0;background:transparent;color:var(--muted);cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--panel)}
+.seg button:focus-visible,button:focus-visible,select:focus-visible,input:focus-visible,canvas:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:16px;max-width:1360px;margin:0 auto;align-items:start}
+@media (max-width:900px){.layout{grid-template-columns:minmax(0,1fr)}}
+.stage{display:flex;flex-direction:column;gap:10px;min-width:0}
+.canvasWrap{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+canvas#cv{display:block;width:100%;touch-action:none;cursor:default}
+.toast{position:absolute;left:12px;right:12px;bottom:12px;background:var(--ink);color:var(--panel);padding:8px 12px;border-radius:6px;font-size:13px;max-width:600px}
+.under{display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px 16px;align-items:center}
+.hint{color:var(--muted);font-size:13px}
+.hint kbd{font-family:var(--font-data);font-size:11px;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 5px;background:var(--panel);color:var(--ink)}
+.legend{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:12px;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.sw{width:12px;height:12px;display:inline-block;border-radius:50%}
+.modeNote{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;font-size:13.5px;max-width:78ch}
+.modeNote b{font-weight:650}
+.dpad{display:none;grid-template-columns:repeat(3,52px);grid-template-rows:repeat(2,44px);gap:6px;justify-content:center}
+.dpad button{font:inherit;font-size:18px;border:1px solid var(--line);background:var(--panel);color:var(--ink);border-radius:8px;touch-action:none}
+.dpad .up{grid-column:2;grid-row:1}.dpad .left{grid-column:1;grid-row:2}.dpad .down{grid-column:2;grid-row:2}.dpad .right{grid-column:3;grid-row:2}
+@media (pointer:coarse){.dpad{display:grid}}
+.panel{display:flex;flex-direction:column;gap:12px;min-width:0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
+.readout .lbl{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.big{font-family:var(--font-data);font-size:40px;font-weight:500;line-height:1.05;font-variant-numeric:tabular-nums;color:var(--accent)}
+.big small{font-size:16px;color:var(--muted);margin-left:4px}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:8px 14px;margin-top:12px}
+.stat{display:flex;flex-direction:column;gap:1px;min-width:0}
+.stat .v{font-family:var(--font-data);font-size:15px;font-variant-numeric:tabular-nums}
+.stat .k{font-size:11.5px;color:var(--muted)}
+#spark{width:100%;height:84px;display:block;margin-top:10px}
+.grp h3{margin:0 0 10px;font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);font-weight:600}
+.row{display:grid;grid-template-columns:1fr auto;gap:4px 10px;align-items:center;margin-bottom:10px}
+.row label{font-size:13px}
+.row .val{font-family:var(--font-data);font-size:12.5px;color:var(--muted);font-variant-numeric:tabular-nums;min-width:4ch;text-align:right}
+.row input[type=range]{grid-column:1/-1;width:100%;accent-color:var(--accent)}
+.row select{grid-column:1/-1;width:100%;font:inherit;font-size:13px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--floor);color:var(--ink)}
+.check{display:flex;align-items:flex-start;gap:8px;font-size:13px;margin-bottom:8px}
+.check input{accent-color:var(--accent);width:16px;height:16px;margin-top:1px;flex:none}
+.btns{display:flex;flex-wrap:wrap;gap:8px}
+.btn{font:inherit;font-size:13px;font-weight:600;padding:7px 12px;border-radius:6px;border:1px solid var(--line);background:var(--floor);color:var(--ink);cursor:pointer}
+.btn.primary{background:var(--ink);color:var(--panel);border-color:var(--ink)}
+.btn[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
+.help{font-size:12px;color:var(--muted);margin:2px 0 0}
+.dims{font-family:var(--font-data);font-size:12px;color:var(--muted);margin:-4px 0 10px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="brand">
+    <span class="name">AirLoc: Interactive Simulation</span>
+    <span class="sub">Walk a testbed, move the tags, and compare the multilateration baseline with AirLoc.</span>
+  </div>
+  <div class="seg" id="modeSeg" role="group" aria-label="Localization method">
+    <button type="button" data-mode="multilat" aria-pressed="false">Multilateration [11]</button>
+    <button type="button" data-mode="airloc" aria-pressed="true">AirLoc</button>
+  </div>
+</header>
+
+<p class="simnote"><b>Simulation, not recorded data.</b> Range and angle measurements are generated from the error trends reported in Fig. 1 of the paper (range error about 35 cm at 10 m, angle error about 0.2 rad behind the user). The page shows how the algorithms behave; its numbers are illustrative and are not the paper's experimental results.</p>
+
+<main class="layout">
+  <section class="stage">
+    <div class="canvasWrap" id="wrap">
+      <canvas id="cv" tabindex="0" aria-label="Testbed floor plan. Use arrow keys to walk; drag tags to relocate them."></canvas>
+      <div class="toast" id="toast" hidden></div>
+    </div>
+    <div class="under">
+      <div class="hint"><kbd>←</kbd><kbd>↑</kbd><kbd>→</kbd><kbd>↓</kbd> or <kbd>WASD</kbd> to walk · drag a tag to relocate it</div>
+      <div class="legend" id="legend"></div>
+    </div>
+    <div class="dpad" aria-label="Walk controls">
+      <button class="up" data-k="ArrowUp" aria-label="Walk up">↑</button>
+      <button class="left" data-k="ArrowLeft" aria-label="Walk left">←</button>
+      <button class="down" data-k="ArrowDown" aria-label="Walk down">↓</button>
+      <button class="right" data-k="ArrowRight" aria-label="Walk right">→</button>
+    </div>
+    <div class="modeNote" id="modeNote"></div>
+  </section>
+
+  <aside class="panel">
+    <div class="card readout">
+      <div class="lbl">User localization error, last step</div>
+      <div class="big" id="curErr">–<small>cm</small></div>
+      <div class="stats">
+        <div class="stat"><span class="v" id="sMed">–</span><span class="k">Median error</span></div>
+        <div class="stat"><span class="v" id="sP90">–</span><span class="k">90th percentile</span></div>
+        <div class="stat"><span class="v" id="sSteps">0</span><span class="k">Steps walked</span></div>
+        <div class="stat"><span class="v" id="sSel">–</span><span class="k">Tags selected / in range</span></div>
+        <div class="stat" data-only="airloc"><span class="v" id="sMap">–</span><span class="k">Median mapping error</span></div>
+        <div class="stat" data-only="airloc"><span class="v" id="sLm">–</span><span class="k">Tags mapped</span></div>
+        <div class="stat"><span class="v" id="sReloc">0</span><span class="k">Tags relocated</span></div>
+        <div class="stat" data-only="multilat"><span class="v" id="sStale">0</span><span class="k">Stale survey positions</span></div>
+        <div class="stat" data-only="airloc"><span class="v" id="sVer">0</span><span class="k">New landmark versions</span></div>
+      </div>
+      <canvas id="spark" aria-label="Error over the last steps"></canvas>
+    </div>
+
+    <div class="card grp">
+      <h3>Testbed</h3>
+      <div class="row">
+        <label for="tbSel">Layout</label>
+        <select id="tbSel">
+          <option value="campus">Campus lab, 10 × 8 m (testbed 1)</option>
+          <option value="apartment">Apartment, 13 × 10 m (testbed 2)</option>
+          <option value="random">Random floor plan</option>
+        </select>
+      </div>
+      <div class="dims" id="dims"></div>
+      <div class="row">
+        <label for="nTags">Number of tags</label><span class="val" id="nTagsV">12</span>
+        <input type="range" id="nTags" min="3" max="30" step="1" value="12">
+      </div>
+      <div class="btns">
+        <button class="btn primary" id="autoBtn" type="button" aria-pressed="false">Auto-walk</button>
+        <button class="btn" id="resetBtn" type="button">Reset run</button>
+        <button class="btn" id="shuffleBtn" type="button">Redeploy tags</button>
+        <button class="btn" id="newLayout" type="button">New layout</button>
+      </div>
+      <p class="help">The testbed layouts are schematic approximations, not the surveyed floor plans.</p>
+    </div>
+
+    <div class="card grp" data-only="multilat">
+      <h3>Multilateration settings</h3>
+      <div class="row">
+        <label for="uSel">Tag selection</label>
+        <select id="uSel"><option value="nearest">k-nearest</option><option value="farthest">k-farthest</option><option value="lowvar">k-least variance</option><option value="all">All in range</option></select>
+      </div>
+      <div class="row"><label for="uK">Selected tags k</label><span class="val" id="uKV">6</span><input type="range" id="uK" min="1" max="12" value="6"></div>
+      <div class="btns"><button class="btn" id="resurvey" type="button">Re-survey tags</button></div>
+      <p class="help">Multilateration needs every tag's surveyed position. Re-survey copies the current positions into its map.</p>
+    </div>
+
+    <div class="card grp" data-only="airloc">
+      <h3>AirLoc settings</h3>
+      <div class="row">
+        <label for="aSel">Tag selection</label>
+        <select id="aSel"><option value="nearest">k-nearest</option><option value="farthest">k-farthest</option><option value="lowvar">k-least variance</option><option value="all">All in range</option></select>
+      </div>
+      <div class="row"><label for="aK">Selected tags k</label><span class="val" id="aKV">5</span><input type="range" id="aK" min="1" max="12" value="5"></div>
+      <div class="row">
+        <label for="aWt">Observation weighting</label>
+        <select id="aWt"><option value="da">Inverse distance and angle, Eq. 4</option><option value="std">Inverse std. dev. of range</option><option value="none">No weighting</option></select>
+      </div>
+      <div class="row"><label for="aNd">Distance exponent n<sub>d</sub></label><span class="val" id="aNdV">3</span><input type="range" id="aNd" min="1" max="6" value="3"></div>
+      <div class="row"><label for="aNa">Angle exponent n<sub>a</sub></label><span class="val" id="aNaV">4</span><input type="range" id="aNa" min="1" max="6" value="4"></div>
+      <div class="row"><label for="aDelta">Optimize every Δ poses</label><span class="val" id="aDeltaV">2</span><input type="range" id="aDelta" min="1" max="10" value="2"></div>
+      <p class="help">Default: the method as described in the paper. The full graph is kept, and each tag has one landmark node.</p>
+      <label class="check"><input type="checkbox" id="aVersion"> <span>Landmark versioning (planned fix, not in the paper): when new observations of a tag disagree with its landmark, start a new node for it</span></label>
+      <label class="check"><input type="checkbox" id="aRobust"> <span>Robust kernel (future work in the paper)</span></label>
+    </div>
+
+    <div class="card grp">
+      <h3>Radio and display</h3>
+      <div class="row"><label for="maxR">UWB detection range</label><span class="val" id="maxRV">12 m</span><input type="range" id="maxR" min="4" max="20" value="12"></div>
+      <div class="row"><label for="noise">Ranging noise scale</label><span class="val" id="noiseV">1.0×</span><input type="range" id="noise" min="0.5" max="3" step="0.1" value="1"></div>
+      <label class="check"><input type="checkbox" id="nlos" checked> <span>Walls attenuate and bias signals (NLOS)</span></label>
+      <label class="check"><input type="checkbox" id="rays" checked> <span>Show selected observations</span></label>
+      <label class="check"><input type="checkbox" id="trails" checked> <span>Show trajectories</span></label>
+      <div class="btns"><button class="btn" id="defaults" type="button">Paper defaults</button></div>
+      <p class="help">Range error grows with distance and angle error with the bearing, following Fig. 1 of the paper. The noise model is not calibrated to specific hardware.</p>
+    </div>
+  </aside>
+</main>
+
+<script>
+(()=>{
+const PI=Math.PI, TAU=2*PI;
+const $=id=>document.getElementById(id);
+const wrap=a=>{a=(a+PI)%TAU;if(a<0)a+=TAU;return a-PI;};
+function randn(){let u=0;while(!u)u=Math.random();return Math.sqrt(-2*Math.log(u))*Math.cos(TAU*Math.random());}
+const rand=(a,b)=>a+Math.random()*(b-a);
+const LABELS=["keychain","laptop sleeve","backpack","wallet","umbrella","bike helmet","suitcase","camera bag","jacket pocket","headphones case","pencil case","gym bag","tote bag","toolbox","water bottle","glasses case","lunch box","remote","notebook","scooter"];
+const MAX_POSES=2400;
+
+const DEF_ML={sel:"nearest",k:6};
+const DEF_AL={sel:"nearest",k:5,wt:"da",nd:3,na:4,delta:2,robust:false,version:false};
+const P={ mode:"airloc", testbed:"campus", ntags:12, maxR:12, noise:1, nlos:true, rays:true, trails:true,
+  multilat:{...DEF_ML}, airloc:{...DEF_AL} };
+const S={ tb:null, tags:[], user:{x:0,y:0}, keys:{}, auto:false, tourIdx:1, run:null, drag:null, hover:null, reloc:0, view:null };
+
+/* ---------- testbeds ---------- */
+function splitWall(x1,y1,x2,y2,dc,vertical){
+  const g=0.45;
+  if(vertical) return [[x1,y1,x1,dc-g],[x1,dc+g,x2,y2]];
+  return [[x1,y1,dc-g,y1],[dc+g,y1,x2,y2]];
+}
+function outer(W,H){return [[0,0,W,0],[W,0,W,H],[W,H,0,H],[0,H,0,0]];}
+function campus(){
+  const W=10,H=8;
+  const desks=[];
+  for(const y of [2.3,4.9]) for(const x of [2.0,4.2,6.4]) desks.push([x,y,1.6,0.8]);
+  const fwd=[[1.3,1.3],[8.7,1.3],[8.7,4.0],[1.3,4.0],[1.3,6.7],[8.7,6.7]];
+  return {name:"Campus lab",W,H,walls:outer(W,H),rooms:[{x0:0,y0:0,x1:W,y1:H,label:"Computer lab"}],desks,
+    tour:fwd.concat(fwd.slice(1,-1).reverse())};
+}
+function grid(W,H,nx,ny,names,name){
+  const xs=[0],ys=[0];
+  for(let i=1;i<nx;i++) xs.push(W*i/nx+rand(-0.12,0.12)*W/nx); xs.push(W);
+  for(let j=1;j<ny;j++) ys.push(H*j/ny+rand(-0.12,0.12)*H/ny); ys.push(H);
+  const rooms=[],walls=outer(W,H),doors={};
+  for(let j=0;j<ny;j++) for(let i=0;i<nx;i++) rooms.push({i,j,x0:xs[i],x1:xs[i+1],y0:ys[j],y1:ys[j+1],label:names?names[(j*nx+i)%names.length]:""});
+  for(let i=1;i<nx;i++) for(let j=0;j<ny;j++){
+    const y0=ys[j],y1=ys[j+1],dc=rand(y0+1,y1-1);
+    walls.push(...splitWall(xs[i],y0,xs[i],y1,dc,true)); doors[`${i-1},${j}|${i},${j}`]=[xs[i],dc];
+  }
+  for(let j=1;j<ny;j++) for(let i=0;i<nx;i++){
+    const x0=xs[i],x1=xs[i+1],dc=rand(x0+1,x1-1);
+    walls.push(...splitWall(x0,ys[j],x1,ys[j],dc,false)); doors[`${i},${j-1}|${i},${j}`]=[dc,ys[j]];
+  }
+  const order=[];
+  for(let j=0;j<ny;j++){const row=[];for(let i=0;i<nx;i++)row.push(rooms[j*nx+i]); if(j%2)row.reverse(); order.push(...row);}
+  const fwd=[];
+  order.forEach((r,idx)=>{
+    const w=r.x1-r.x0,h=r.y1-r.y0;
+    fwd.push([r.x0+0.3*w,r.y0+0.3*h],[r.x1-0.3*w,r.y1-0.3*h],[(r.x0+r.x1)/2,(r.y0+r.y1)/2]);
+    const nx2=order[idx+1]; if(!nx2) return;
+    const a=`${r.i},${r.j}|${nx2.i},${nx2.j}`, b=`${nx2.i},${nx2.j}|${r.i},${r.j}`;
+    fwd.push(doors[a]||doors[b]);
+  });
+  return {name,W,H,walls,rooms,desks:[],tour:fwd.concat(fwd.slice(1,-1).reverse())};
+}
+function makeTestbed(kind){
+  if(kind==="campus") return campus();
+  if(kind==="apartment") return grid(13,10,3,2,["Entry","Living room","Kitchen","Bedroom","Bath","Study"],"Apartment");
+  const W=Math.round(rand(11,19)),H=Math.round(rand(8,13));
+  return grid(W,H,2+Math.floor(Math.random()*3),1+Math.floor(Math.random()*3),null,"Random floor plan");
+}
+
+/* ---------- tags ---------- */
+function placeTags(){
+  const tb=S.tb, n=P.ntags, tags=[];
+  const r0=tb.rooms.find(r=>r.x0<=tb.tour[0][0]&&tb.tour[0][0]<=r.x1&&r.y0<=tb.tour[0][1]&&tb.tour[0][1]<=r.y1)||tb.rooms[0];
+  tags.push({id:0,fixed:true,label:"fixed tag (map origin)",x:r0.x0+0.45,y:r0.y0+0.45});
+  const area=tb.rooms.map(r=>(r.x1-r.x0)*(r.y1-r.y0)), tot=area.reduce((a,b)=>a+b,0);
+  for(let i=1;i<n;i++){
+    let best=null;
+    for(let t=0;t<40;t++){
+      let u=Math.random()*tot,ri=0; while(u>area[ri]){u-=area[ri];ri++;}
+      const r=tb.rooms[Math.min(ri,tb.rooms.length-1)];
+      const p={x:rand(r.x0+0.4,r.x1-0.4),y:rand(r.y0+0.4,r.y1-0.4)};
+      const dmin=Math.min(...tags.map(q=>Math.hypot(q.x-p.x,q.y-p.y)));
+      if(!best||dmin>best.d) best={...p,d:dmin};
+      if(dmin>1.1) break;
+    }
+    tags.push({id:i,fixed:false,label:LABELS[(i-1)%LABELS.length]+(i>LABELS.length?" "+Math.ceil(i/LABELS.length):""),x:best.x,y:best.y});
+  }
+  tags.forEach(t=>{t.sx=t.x;t.sy=t.y;t.hist=[];t.carried=false;});
+  S.tags=tags;
+}
+
+/* ---------- geometry ---------- */
+function cross(ax,ay,bx,by,cx,cy){return (bx-ax)*(cy-ay)-(by-ay)*(cx-ax);}
+function segHit(ax,ay,bx,by,w){
+  const [cx,cy,dx,dy]=w;
+  const d1=cross(cx,cy,dx,dy,ax,ay),d2=cross(cx,cy,dx,dy,bx,by),d3=cross(ax,ay,bx,by,cx,cy),d4=cross(ax,ay,bx,by,dx,dy);
+  return ((d1>0)!==(d2>0))&&((d3>0)!==(d4>0));
+}
+const wallsCrossed=(ax,ay,bx,by)=>S.tb.walls.reduce((n,w)=>n+(segHit(ax,ay,bx,by,w)?1:0),0);
+
+/* ---------- run state ---------- */
+function resetRun(){
+  const [x,y]=S.tb.tour[0];
+  S.user={x,y}; S.tourIdx=1; S.reloc=0;
+  S.tags.forEach(t=>{t.hist=[];t.carried=false;});
+  const fixed=S.tags[0];
+  S.run={steps:0,stepStart:{x,y},prevPsiTrue:null,bias:0,
+    x0:{x,y,psi:0},poses:[{x,y,psi:0}],odo:[null],obs:[[]],
+    lm:new Map(),active:new Map(),pending:new Map(),nextLid:0,versions:0,
+    origin:{x:fixed.x,y:fixed.y},est:{x,y},psiHat:0,errs:[],trueTrail:[[x,y]],estTrail:[[x,y]],
+    lastSel:[],lastInRange:0,lastPose:{x,y,psi:0}};
+  updateStats(); draw();
+}
+
+/* ---------- measurement model (Fig. 1 trends) ---------- */
+function measure(px,py,psi){
+  const out=[];
+  for(const t of S.tags){
+    if(t.carried) continue;
+    const d=Math.hypot(t.x-px,t.y-py);
+    const nw=P.nlos?wallsCrossed(px,py,t.x,t.y):0;
+    if(nw>2) continue;
+    if(d>P.maxR*(nw?0.6:1)) continue;
+    const thTrue=wrap(Math.atan2(t.y-py,t.x-px)-psi);
+    const sr=(0.02+0.03*d)*P.noise*(nw?2:1);
+    const bias=nw?nw*rand(0.12,0.3):0;
+    const rho=Math.max(0.05,d+bias+randn()*sr);
+    const sa=(0.03+0.17*Math.pow(Math.abs(thTrue)/PI,1.5)+0.004*d)*P.noise+(nw?0.12:0);
+    const theta=wrap(thTrue+randn()*sa);
+    t.hist.push(rho); if(t.hist.length>10) t.hist.shift();
+    out.push({id:t.id,rho,theta,nlos:nw});
+  }
+  return out;
+}
+const variance=h=>{if(h.length<3)return Infinity;const m=h.reduce((a,b)=>a+b,0)/h.length;return h.reduce((a,b)=>a+(b-m)**2,0)/h.length;};
+function select(list,method,k){
+  const L=list.slice();
+  if(method==="nearest") L.sort((a,b)=>a.rho-b.rho);
+  else if(method==="farthest") L.sort((a,b)=>b.rho-a.rho);
+  else if(method==="lowvar") L.sort((a,b)=>variance(S.tags[a.id].hist)-variance(S.tags[b.id].hist));
+  return method==="all"?L:L.slice(0,k);
+}
+function weight(o){
+  const A=P.airloc;
+  if(A.wt==="none") return 1;
+  if(A.wt==="std"){const v=variance(S.tags[o.id].hist);if(!isFinite(v))return 1;return Math.min(8,0.05/Math.max(Math.sqrt(v),0.005));}
+  const d=Math.max(o.rho,0.5),a=Math.abs(o.theta); /* theta is wrapped to [-pi, pi]; the weight uses |theta| */
+  return Math.min(8,1/(Math.pow(d,A.nd)+Math.pow(a,A.na)));
+}
+
+/* ---------- step event ---------- */
+function onStep(){
+  const R=S.run, u=S.user;
+  if(P.mode==="airloc"&&R.poses.length>=MAX_POSES){resetRun();toast(`Run reset after ${MAX_POSES} steps to keep the page responsive.`);return;}
+  const dx=u.x-R.stepStart.x, dy=u.y-R.stepStart.y, l=Math.hypot(dx,dy);
+  const psiTrue=Math.atan2(dy,dx);
+  if(R.prevPsiTrue===null){R.prevPsiTrue=psiTrue;R.poses[0].psi=psiTrue;R.x0.psi=psiTrue;R.psiHat=psiTrue;}
+  R.bias+=randn()*0.002;
+  const dpsi=wrap(psiTrue-R.prevPsiTrue)+randn()*0.02+R.bias;
+  const lm=l*(1+randn()*0.04);
+  R.prevPsiTrue=psiTrue; R.stepStart={x:u.x,y:u.y}; R.steps++;
+  const meas=measure(u.x,u.y,psiTrue);
+  R.lastInRange=meas.length;
+  if(P.mode==="multilat") stepMultilat(lm,dpsi,meas); else stepAirLoc(lm,dpsi,meas);
+  const err=Math.hypot(R.est.x-u.x,R.est.y-u.y);
+  R.errs.push(err);
+  R.trueTrail.push([u.x,u.y]); R.estTrail.push([R.est.x,R.est.y]);
+  if(R.trueTrail.length>600){R.trueTrail.shift();R.estTrail.shift();}
+  updateStats();
+}
+
+function stepMultilat(l,dpsi,meas){
+  const R=S.run,U=P.multilat;
+  R.psiHat=wrap(R.psiHat+dpsi);
+  const pred={x:R.est.x+l*Math.cos(R.psiHat),y:R.est.y+l*Math.sin(R.psiHat)};
+  const sel=select(meas,U.sel,U.k);
+  R.lastSel=sel.map(o=>({...o,w:1}));
+  let p=pred;
+  if(sel.length>=2){
+    let x=pred.x,y=pred.y;
+    for(let it=0;it<15;it++){
+      let a=1e-6,b=0,c=1e-6,g1=0,g2=0;
+      for(const o of sel){const t=S.tags[o.id];const ex=x-t.sx,ey=y-t.sy,d=Math.max(Math.hypot(ex,ey),1e-3);
+        const jx=ex/d,jy=ey/d,r=d-o.rho;a+=jx*jx;b+=jx*jy;c+=jy*jy;g1+=jx*r;g2+=jy*r;}
+      const det=a*c-b*b; const dx=-(c*g1-b*g2)/det, dy=-(a*g2-b*g1)/det;
+      x+=dx;y+=dy; if(Math.hypot(dx,dy)<1e-4) break;
+    }
+    p={x,y};
+  } else if(sel.length===1){
+    const o=sel[0],t=S.tags[o.id];
+    p={x:t.sx-o.rho*Math.cos(R.psiHat+o.theta),y:t.sy-o.rho*Math.sin(R.psiHat+o.theta)};
+  }
+  R.est=p; R.lastPose={x:p.x,y:p.y,psi:R.psiHat};
+}
+
+/* Gate for landmark versioning, from the same error trends as Fig. 1 (base noise level). */
+function gateFor(o){
+  const sr=0.02+0.03*o.rho, sa=0.03+0.17*Math.pow(Math.abs(o.theta)/PI,1.5)+0.004*o.rho;
+  return 3*Math.hypot(sr,o.rho*sa)+0.4;
+}
+function newLandmark(tagId,x,y){
+  const R=S.run,lid=R.nextLid++;
+  R.lm.set(lid,{x,y,tag:tagId});
+  R.active.set(tagId,lid);
+  return lid;
+}
+
+function stepAirLoc(l,dpsi,meas){
+  const R=S.run,A=P.airloc;
+  const prev=R.poses[R.poses.length-1];
+  const psi=wrap(prev.psi+dpsi);
+  const pose={x:prev.x+l*Math.cos(psi),y:prev.y+l*Math.sin(psi),psi};
+  const t=R.poses.length;
+  R.poses.push(pose); R.odo.push({l,dpsi}); R.obs.push([]);
+  const sel=select(meas,A.sel,A.k).map(o=>({...o,w:weight(o)}));
+  R.lastSel=[];
+  for(const o of sel){
+    const tag=S.tags[o.id];
+    const gx=pose.x+o.rho*Math.cos(psi+o.theta), gy=pose.y+o.rho*Math.sin(psi+o.theta);
+    let lid=R.active.get(o.id);
+    if(lid===undefined){
+      lid=tag.fixed?newLandmark(o.id,R.origin.x,R.origin.y):newLandmark(o.id,gx,gy);
+    } else if(A.version&&!tag.fixed){
+      const m=R.lm.get(lid);
+      const pend=R.pending.get(o.id)||[];
+      if(Math.hypot(gx-m.x,gy-m.y)>gateFor(o)){
+        pend.push({t,rho:o.rho,theta:o.theta,w:o.w,gx,gy});
+        R.pending.set(o.id,pend);
+        if(pend.length>=3){
+          const mx=pend.reduce((s,p)=>s+p.gx,0)/pend.length, my=pend.reduce((s,p)=>s+p.gy,0)/pend.length;
+          const nl=newLandmark(o.id,mx,my); R.versions++;
+          for(const p of pend) R.obs[p.t].push({lid:nl,rho:p.rho,theta:p.theta,w:p.w});
+          R.pending.set(o.id,[]);
+          R.lastSel.push({...o,lid:nl});
+        }
+        continue;
+      }
+      R.pending.set(o.id,[]);
+    }
+    R.obs[t].push({lid,rho:o.rho,theta:o.theta,w:o.w});
+    R.lastSel.push({...o,lid});
+  }
+  if((R.poses.length-1)%A.delta===0) optimize();
+  const last=R.poses[R.poses.length-1];
+  R.est={x:last.x,y:last.y}; R.lastPose=last;
+}
+
+/* ---------- full-graph GraphSLAM (Eq. 3) ----------
+   All poses and all observations stay in the graph, as in the paper.
+   The normal equations are solved exactly with a Schur complement:
+   the pose block is banded (odometry chain), the landmark block is small. */
+function bandChol(AB,n,bw){ // AB[i*(bw+1)+k] = A[i][i-k]; returns L in the same layout
+  const L=new Float64Array(AB.length);
+  for(let i=0;i<n;i++){
+    for(let k=Math.min(bw,i);k>=0;k--){
+      const j=i-k;
+      let s=AB[i*(bw+1)+k];
+      for(let q=1;q<=bw;q++){const c=j-q;if(c<0||i-c>bw)continue;s-=L[i*(bw+1)+(i-c)]*L[j*(bw+1)+(j-c)];}
+      if(k===0)L[i*(bw+1)]=Math.sqrt(Math.max(s,1e-12));
+      else L[i*(bw+1)+k]=s/L[j*(bw+1)];
+    }
+  }
+  return L;
+}
+function bandSolve(L,n,bw,b){ // solves (L L^T) x = b in place on a copy
+  const y=Float64Array.from(b);
+  for(let i=0;i<n;i++){let s=y[i];for(let k=1;k<=bw&&i-k>=0;k++)s-=L[i*(bw+1)+k]*y[i-k];y[i]=s/L[i*(bw+1)];}
+  for(let i=n-1;i>=0;i--){let s=y[i];for(let k=1;k<=bw&&i+k<n;k++)s-=L[(i+k)*(bw+1)+k]*y[i+k];y[i]=s/L[i*(bw+1)];}
+  return y;
+}
+function denseChol(A,n){
+  const L=new Float64Array(n*n);
+  for(let i=0;i<n;i++)for(let j=0;j<=i;j++){
+    let s=A[i*n+j];for(let k=0;k<j;k++)s-=L[i*n+k]*L[j*n+k];
+    if(i===j)L[i*n+i]=Math.sqrt(Math.max(s,1e-12));else L[i*n+j]=s/L[j*n+j];
+  }
+  return L;
+}
+function denseSolve(L,n,b){
+  const y=new Float64Array(n);
+  for(let i=0;i<n;i++){let s=b[i];for(let k=0;k<i;k++)s-=L[i*n+k]*y[k];y[i]=s/L[i*n+i];}
+  const x=new Float64Array(n);
+  for(let i=n-1;i>=0;i--){let s=y[i];for(let k=i+1;k<n;k++)s-=L[k*n+i]*x[k];x[i]=s/L[i*n+i];}
+  return x;
+}
+function optimize(){
+  const R=S.run,A=P.airloc,BW=5;
+  const T=R.poses.length-1, np=3*(T+1);
+  const lmIdx=new Map(); let m=0;
+  for(let i=0;i<=T;i++)for(const o of R.obs[i])if(!lmIdx.has(o.lid)){lmIdx.set(o.lid,m);m+=2;}
+  const xp=new Float64Array(np), xl=new Float64Array(m);
+  for(let i=0;i<=T;i++){const p=R.poses[i];xp[3*i]=p.x;xp[3*i+1]=p.y;xp[3*i+2]=p.psi;}
+  for(const [lid,k] of lmIdx){const q=R.lm.get(lid);xl[k]=q.x;xl[k+1]=q.y;}
+  const io=[1/0.06**2,1/0.06**2,1/0.05**2], x0=R.x0;
+  for(let it=0;it<6;it++){
+    const AB=new Float64Array(np*(BW+1)), Bm=new Float64Array(np*m), C=new Float64Array(m*m);
+    const gp=new Float64Array(np), gl=new Float64Array(m);
+    const addA=(i,j,v)=>{if(i<j){const t=i;i=j;j=t;}AB[i*(BW+1)+(i-j)]+=v;};
+    // prior on x0
+    for(let a=0;a<3;a++){let r=xp[a]-[x0.x,x0.y,x0.psi][a];if(a===2)r=wrap(r);addA(a,a,1e6);gp[a]+=1e6*r;}
+    // odometry
+    for(let i=1;i<=T;i++){
+      const u=R.odo[i],k0=3*(i-1),k1=3*i,ps=xp[k0+2]+u.dpsi,c=Math.cos(ps),s=Math.sin(ps);
+      const r=[xp[k1]-xp[k0]-u.l*c, xp[k1+1]-xp[k0+1]-u.l*s, wrap(xp[k1+2]-ps)];
+      const J=[[-1,0,u.l*s,1,0,0],[0,-1,-u.l*c,0,1,0],[0,0,-1,0,0,1]];
+      const idx=[k0,k0+1,k0+2,k1,k1+1,k1+2];
+      for(let q=0;q<3;q++){const w=io[q];
+        for(let a=0;a<6;a++){if(!J[q][a])continue;gp[idx[a]]+=J[q][a]*w*r[q];
+          for(let b=0;b<=a;b++){if(J[q][b])addA(idx[a],idx[b],J[q][a]*w*J[q][b]);}}}
+    }
+    // observations
+    for(let i=0;i<=T;i++){
+      const k=3*i,px=xp[k],py=xp[k+1],psi=xp[k+2];
+      for(const o of R.obs[i]){
+        const lk=lmIdx.get(o.lid),mx=xl[lk],my=xl[lk+1];
+        const dx=mx-px,dy=my-py,d=Math.max(Math.hypot(dx,dy),1e-6),d2=d*d;
+        const r=[o.rho-d, wrap(o.theta-(Math.atan2(dy,dx)-psi))];
+        let info=[o.w/0.08**2,o.w/0.06**2];
+        if(A.robust){const e=Math.sqrt(info[0]*r[0]*r[0]+info[1]*r[1]*r[1]);if(e>2){info=[info[0]*2/e,info[1]*2/e];}}
+        const Jp=[[dx/d,dy/d,0],[-dy/d2,dx/d2,1]], Jl=[[-dx/d,-dy/d],[dy/d2,-dx/d2]];
+        for(let q=0;q<2;q++){const w=info[q];
+          for(let a=0;a<3;a++){gp[k+a]+=Jp[q][a]*w*r[q];
+            for(let b=0;b<=a;b++)addA(k+a,k+b,Jp[q][a]*w*Jp[q][b]);
+            for(let b=0;b<2;b++)Bm[(k+a)*m+lk+b]+=Jp[q][a]*w*Jl[q][b];}
+          for(let a=0;a<2;a++){gl[lk+a]+=Jl[q][a]*w*r[q];
+            for(let b=0;b<2;b++)C[(lk+a)*m+lk+b]+=Jl[q][a]*w*Jl[q][b];}}
+      }
+    }
+    // the fixed tag anchors the map
+    for(const [lid,k] of lmIdx){const q=R.lm.get(lid);if(!S.tags[q.tag]||!S.tags[q.tag].fixed)continue;
+      for(let a=0;a<2;a++){C[(k+a)*m+k+a]+=1e6;gl[k+a]+=1e6*(xl[k+a]-(a?R.origin.y:R.origin.x));}}
+    // Levenberg damping
+    for(let i=0;i<np;i++)AB[i*(BW+1)]+=1e-6+1e-4*AB[i*(BW+1)];
+    for(let i=0;i<m;i++)C[i*m+i]+=1e-6+1e-4*C[i*m+i];
+    // Schur complement on the landmarks
+    const L=bandChol(AB,np,BW);
+    const bp=gp.map(v=>-v), bl=gl.map(v=>-v);
+    const Ainv_bp=bandSolve(L,np,BW,bp);
+    const AinvB=new Array(m);
+    for(let c=0;c<m;c++){const col=new Float64Array(np);for(let i=0;i<np;i++)col[i]=Bm[i*m+c];AinvB[c]=bandSolve(L,np,BW,col);}
+    const Sc=Float64Array.from(C), rl=Float64Array.from(bl);
+    for(let a=0;a<m;a++){
+      let s=0;for(let i=0;i<np;i++)s+=Bm[i*m+a]*Ainv_bp[i];rl[a]-=s;
+      for(let b=0;b<=a;b++){let t=0;const col=AinvB[b];for(let i=0;i<np;i++)t+=Bm[i*m+a]*col[i];Sc[a*m+b]-=t;if(a!==b)Sc[b*m+a]-=t;}
+    }
+    const dl=m?denseSolve(denseChol(Sc,m),m,rl):new Float64Array(0);
+    const rhs=Float64Array.from(bp);
+    for(let i=0;i<np;i++){let s=0;for(let c=0;c<m;c++)s+=Bm[i*m+c]*dl[c];rhs[i]-=s;}
+    const dp=bandSolve(L,np,BW,rhs);
+    let mx=0;
+    for(let i=0;i<np;i++){if(!isFinite(dp[i]))return;xp[i]+=dp[i];mx=Math.max(mx,Math.abs(dp[i]));}
+    for(let i=0;i<m;i++){if(!isFinite(dl[i]))return;xl[i]+=dl[i];mx=Math.max(mx,Math.abs(dl[i]));}
+    if(mx<1e-4)break;
+  }
+  for(let i=0;i<=T;i++)R.poses[i]={x:xp[3*i],y:xp[3*i+1],psi:wrap(xp[3*i+2])};
+  for(const [lid,k] of lmIdx){const q=R.lm.get(lid);q.x=xl[k];q.y=xl[k+1];}
+}
+
+/* ---------- stats ---------- */
+const pct=(a,p)=>{if(!a.length)return NaN;const s=a.slice().sort((x,y)=>x-y);return s[Math.min(s.length-1,Math.floor(p*(s.length-1)+0.5))];};
+const cm=v=>isFinite(v)?(v*100).toFixed(1)+" cm":"–";
+function updateStats(){
+  const R=S.run; if(!R) return;
+  const e=R.errs;
+  $("curErr").innerHTML=(e.length?(e[e.length-1]*100).toFixed(1):"–")+"<small>cm</small>";
+  $("sMed").textContent=cm(pct(e,0.5)); $("sP90").textContent=cm(pct(e,0.9));
+  $("sSteps").textContent=R.steps;
+  $("sSel").textContent=R.steps?`${R.lastSel.length} / ${R.lastInRange}`:"–";
+  $("sReloc").textContent=S.reloc;
+  if(P.mode==="airloc"){
+    const me=[];for(const [id,lid] of R.active){const t=S.tags[id];if(t&&!t.fixed){const m=R.lm.get(lid);me.push(Math.hypot(m.x-t.x,m.y-t.y));}}
+    $("sMap").textContent=cm(pct(me,0.5)); $("sLm").textContent=`${R.active.size} of ${S.tags.length}`;
+    $("sVer").textContent=R.versions;
+  } else {
+    $("sStale").textContent=S.tags.filter(t=>Math.hypot(t.x-t.sx,t.y-t.sy)>0.05).length;
+  }
+  drawSpark();
+}
+
+/* ---------- colors ---------- */
+let C={};
+function readColors(){const cs=getComputedStyle(document.documentElement);
+  for(const k of ["bg","panel","ink","muted","line","floor","grid","wall","furn","accent","accent-soft","fixed","lm","good","warn"])C[k]=cs.getPropertyValue("--"+k).trim();}
+function alpha(hex,a){if(!hex.startsWith("#"))return hex;const n=parseInt(hex.slice(1),16);return `rgba(${n>>16&255},${n>>8&255},${n&255},${a})`;}
+function cssFont(v){return getComputedStyle(document.documentElement).getPropertyValue(v)||"monospace";}
+
+/* ---------- drawing ---------- */
+const cv=$("cv"),ctx=cv.getContext("2d");
+function resize(){
+  const wrapEl=$("wrap"),W=wrapEl.clientWidth,tb=S.tb;
+  const maxH=Math.max(320,window.innerHeight*0.72);
+  let h=Math.min(maxH,W*(tb.H+1.2)/(tb.W+1.2));
+  const dpr=window.devicePixelRatio||1;
+  cv.style.height=h+"px"; cv.width=Math.round(W*dpr); cv.height=Math.round(h*dpr);
+  const pad=28, sc=Math.min((W-2*pad)/tb.W,(h-2*pad-10)/tb.H);
+  S.view={sc,ox:(W-sc*tb.W)/2,oy:(h-sc*tb.H)/2-4,dpr,W,h};
+  draw();
+}
+const X=x=>S.view.ox+x*S.view.sc, Y=y=>S.view.oy+y*S.view.sc;
+function draw(){
+  if(!S.view||!S.run)return;
+  const v=S.view,tb=S.tb,R=S.run;
+  ctx.setTransform(v.dpr,0,0,v.dpr,0,0);
+  ctx.fillStyle=C.panel;ctx.fillRect(0,0,v.W,v.h);
+  ctx.fillStyle=C.floor;ctx.fillRect(X(0),Y(0),tb.W*v.sc,tb.H*v.sc);
+  ctx.strokeStyle=C.grid;ctx.lineWidth=1;ctx.beginPath();
+  for(let x=1;x<tb.W;x++){ctx.moveTo(X(x)+.5,Y(0));ctx.lineTo(X(x)+.5,Y(tb.H));}
+  for(let y=1;y<tb.H;y++){ctx.moveTo(X(0),Y(y)+.5);ctx.lineTo(X(tb.W),Y(y)+.5);}
+  ctx.stroke();
+  ctx.fillStyle=C.furn;for(const d of tb.desks)ctx.fillRect(X(d[0]),Y(d[1]),d[2]*v.sc,d[3]*v.sc);
+  ctx.font="500 11px "+cssFont("--font-ui");
+  ctx.fillStyle=C.muted;ctx.textAlign="right";ctx.textBaseline="top";
+  for(const r of tb.rooms)if(r.label)ctx.fillText(r.label.toUpperCase(),X(r.x1)-6,Y(r.y0)+6);
+  ctx.strokeStyle=C.wall;ctx.lineWidth=3;ctx.lineCap="square";ctx.beginPath();
+  for(const w of tb.walls){ctx.moveTo(X(w[0]),Y(w[1]));ctx.lineTo(X(w[2]),Y(w[3]));}ctx.stroke();
+  // scale bar
+  ctx.strokeStyle=C.muted;ctx.lineWidth=1.5;ctx.beginPath();
+  const sbx=X(0),sby=Y(tb.H)+12;ctx.moveTo(sbx,sby);ctx.lineTo(sbx+v.sc,sby);ctx.moveTo(sbx,sby-3);ctx.lineTo(sbx,sby+3);ctx.moveTo(sbx+v.sc,sby-3);ctx.lineTo(sbx+v.sc,sby+3);ctx.stroke();
+  ctx.fillStyle=C.muted;ctx.textAlign="left";ctx.textBaseline="middle";ctx.font="11px "+cssFont("--font-data");ctx.fillText("1 m",sbx+v.sc+6,sby);
+
+  if(P.trails){
+    line(R.trueTrail,alpha(C.ink,0.35),1.5,[]);
+    line(R.estTrail,alpha(C.accent,0.75),1.5,[4,3]);
+  }
+  if(P.rays&&R.steps){
+    if(P.mode==="multilat"){
+      for(const o of R.lastSel){const t=S.tags[o.id];const sr=(0.02+0.03*o.rho)*P.noise;
+        ctx.strokeStyle=alpha(C.accent,0.28);ctx.lineWidth=Math.max(1,2*sr*v.sc);
+        ctx.beginPath();ctx.arc(X(t.sx),Y(t.sy),o.rho*v.sc,0,TAU);ctx.stroke();}
+    } else {
+      const mw=Math.max(...R.lastSel.map(o=>o.w),1e-9);
+      for(const o of R.lastSel){const m=R.lm.get(o.lid);if(!m)continue;
+        ctx.strokeStyle=alpha(C.accent,0.15+0.75*(o.w/mw));ctx.lineWidth=1+2*(o.w/mw);
+        ctx.beginPath();ctx.moveTo(X(R.lastPose.x),Y(R.lastPose.y));ctx.lineTo(X(m.x),Y(m.y));ctx.stroke();}
+    }
+  }
+  if(P.mode==="multilat"){
+    for(const t of S.tags){if(Math.hypot(t.x-t.sx,t.y-t.sy)<0.05)continue;
+      ctx.setLineDash([3,3]);ctx.strokeStyle=C.warn;ctx.lineWidth=1.2;
+      ctx.beginPath();ctx.moveTo(X(t.sx),Y(t.sy));ctx.lineTo(X(t.x),Y(t.y));ctx.stroke();
+      ctx.beginPath();ctx.arc(X(t.sx),Y(t.sy),7,0,TAU);ctx.stroke();ctx.setLineDash([]);}
+  }
+  // tags
+  for(const t of S.tags){
+    const x=X(t.x),y=Y(t.y),fx=t.fixed&&P.mode==="airloc";
+    ctx.fillStyle=C.panel;ctx.strokeStyle=fx?C.fixed:C.ink;ctx.lineWidth=fx?2.5:1.5;
+    ctx.beginPath();ctx.arc(x,y,8,0,TAU);ctx.fill();ctx.stroke();
+    ctx.fillStyle=fx?C.fixed:alpha(C.ink,0.75);
+    ctx.beginPath();ctx.arc(x,y,3,0,TAU);ctx.fill();
+    if(fx){ctx.strokeStyle=C.fixed;ctx.lineWidth=1;ctx.beginPath();ctx.arc(x,y,12,0,TAU);ctx.stroke();}
+  }
+  // landmarks: active versions solid, retired versions faded
+  if(P.mode==="airloc"){
+    for(const [lid,m] of R.lm){const t=S.tags[m.tag];if(!t||t.fixed)continue;
+      const live=R.active.get(m.tag)===lid,x=X(m.x),y=Y(m.y),r=live?6:4;
+      if(live){ctx.strokeStyle=alpha(C.lm,0.6);ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(X(t.x),Y(t.y));ctx.stroke();}
+      ctx.fillStyle=alpha(C.lm,live?0.18:0.06);ctx.strokeStyle=live?C.lm:alpha(C.lm,0.35);ctx.lineWidth=live?1.6:1;
+      ctx.beginPath();ctx.moveTo(x,y-r);ctx.lineTo(x+r,y);ctx.lineTo(x,y+r);ctx.lineTo(x-r,y);ctx.closePath();ctx.fill();ctx.stroke();}
+  }
+  // user
+  const u=S.user,e=R.est;
+  ctx.strokeStyle=alpha(C.accent,0.6);ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(X(u.x),Y(u.y));ctx.lineTo(X(e.x),Y(e.y));ctx.stroke();
+  const hd=R.prevPsiTrue??0;
+  ctx.fillStyle=C.ink;ctx.beginPath();ctx.arc(X(u.x),Y(u.y),6.5,0,TAU);ctx.fill();
+  ctx.strokeStyle=C.ink;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(X(u.x),Y(u.y));ctx.lineTo(X(u.x)+14*Math.cos(hd),Y(u.y)+14*Math.sin(hd));ctx.stroke();
+  ctx.strokeStyle=C.accent;ctx.lineWidth=2.2;ctx.beginPath();ctx.arc(X(e.x),Y(e.y),9,0,TAU);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(X(e.x)-13,Y(e.y));ctx.lineTo(X(e.x)-5,Y(e.y));ctx.moveTo(X(e.x)+5,Y(e.y));ctx.lineTo(X(e.x)+13,Y(e.y));
+  ctx.moveTo(X(e.x),Y(e.y)-13);ctx.lineTo(X(e.x),Y(e.y)-5);ctx.moveTo(X(e.x),Y(e.y)+5);ctx.lineTo(X(e.x),Y(e.y)+13);ctx.stroke();
+  const ht=S.drag?S.tags[S.drag.id]:S.hover!=null?S.tags[S.hover]:null;
+  if(ht){
+    const txt=`${ht.label} · (${ht.x.toFixed(2)}, ${ht.y.toFixed(2)}) m`;
+    ctx.font="12px "+cssFont("--font-data");const tw=ctx.measureText(txt).width+14;
+    let bx=X(ht.x)+14,by=Y(ht.y)-30;if(bx+tw>v.W-4)bx=X(ht.x)-14-tw;if(by<4)by=Y(ht.y)+14;
+    ctx.fillStyle=C.ink;ctx.fillRect(bx,by,tw,22);ctx.fillStyle=C.panel;ctx.textAlign="left";ctx.textBaseline="middle";ctx.fillText(txt,bx+7,by+11);
+  }
+}
+function line(pts,color,w,dash){if(pts.length<2)return;ctx.strokeStyle=color;ctx.lineWidth=w;ctx.setLineDash(dash);ctx.beginPath();
+  pts.forEach((p,i)=>i?ctx.lineTo(X(p[0]),Y(p[1])):ctx.moveTo(X(p[0]),Y(p[1])));ctx.stroke();ctx.setLineDash([]);}
+
+const sp=$("spark"),sx=sp.getContext("2d");
+function drawSpark(){
+  const dpr=window.devicePixelRatio||1,W=sp.clientWidth,H=sp.clientHeight;if(!W)return;
+  sp.width=W*dpr;sp.height=H*dpr;sx.setTransform(dpr,0,0,dpr,0,0);sx.clearRect(0,0,W,H);
+  const e=S.run.errs.slice(-240).map(v=>v*100);
+  const top=6,bot=H-16,left=30,right=W-6;
+  const ymax=Math.max(10,Math.ceil((Math.max(...e,0)*1.1)/10)*10);
+  sx.font="10px "+cssFont("--font-data");sx.fillStyle=C.muted;sx.textAlign="right";sx.textBaseline="middle";
+  sx.strokeStyle=C.grid;sx.lineWidth=1;
+  for(const f of [0,0.5,1]){const yy=bot-(bot-top)*f;sx.beginPath();sx.moveTo(left,yy+.5);sx.lineTo(right,yy+.5);sx.stroke();sx.fillText(Math.round(ymax*f),left-5,yy);}
+  sx.textAlign="left";sx.textBaseline="alphabetic";sx.fillText(e.length?`error (cm), last ${e.length} steps`:"error (cm) appears once you walk",left,H-3);
+  if(e.length<2)return;
+  const xs=i=>left+(right-left)*i/(e.length-1),ys=v=>bot-(bot-top)*Math.min(v,ymax)/ymax;
+  sx.beginPath();sx.moveTo(xs(0),bot);e.forEach((v,i)=>sx.lineTo(xs(i),ys(v)));sx.lineTo(xs(e.length-1),bot);sx.closePath();
+  sx.fillStyle=C["accent-soft"];sx.fill();
+  sx.beginPath();e.forEach((v,i)=>i?sx.lineTo(xs(i),ys(v)):sx.moveTo(xs(i),ys(v)));sx.strokeStyle=C.accent;sx.lineWidth=1.5;sx.stroke();
+  const md=pct(S.run.errs,0.5)*100;sx.setLineDash([3,3]);sx.strokeStyle=C.ink;sx.lineWidth=1;sx.beginPath();sx.moveTo(left,ys(md));sx.lineTo(right,ys(md));sx.stroke();sx.setLineDash([]);
+  sx.fillStyle=C.accent;sx.beginPath();sx.arc(xs(e.length-1),ys(e[e.length-1]),3,0,TAU);sx.fill();
+}
+
+/* ---------- motion loop ---------- */
+const STEP=0.6;
+function tryMove(dx,dy){
+  const u=S.user,tb=S.tb;
+  const ok=(nx,ny)=>nx>0.15&&ny>0.15&&nx<tb.W-0.15&&ny<tb.H-0.15&&!tb.walls.some(w=>segHit(u.x,u.y,nx,ny,w));
+  if(ok(u.x+dx,u.y+dy)){u.x+=dx;u.y+=dy;}else if(ok(u.x+dx,u.y)){u.x+=dx;}else if(ok(u.x,u.y+dy)){u.y+=dy;}
+}
+let last=performance.now();
+function loop(now){
+  const dt=Math.min(0.05,(now-last)/1000);last=now;
+  const k=S.keys;let vx=(k.right?1:0)-(k.left?1:0),vy=(k.down?1:0)-(k.up?1:0);
+  let moved=false;
+  if(vx||vy){const n=Math.hypot(vx,vy);tryMove(vx/n*1.3*dt,vy/n*1.3*dt);moved=true;}
+  else if(S.auto){
+    const tg=S.tb.tour[S.tourIdx],u=S.user,dx=tg[0]-u.x,dy=tg[1]-u.y,d=Math.hypot(dx,dy),sp=1.1*dt;
+    if(d<=sp){u.x=tg[0];u.y=tg[1];S.tourIdx=(S.tourIdx+1)%S.tb.tour.length;}else{u.x+=dx/d*sp;u.y+=dy/d*sp;}
+    moved=true;
+  }
+  if(moved){const R=S.run;if(Math.hypot(S.user.x-R.stepStart.x,S.user.y-R.stepStart.y)>=STEP)onStep();draw();}
+  requestAnimationFrame(loop);
+}
+
+/* ---------- input ---------- */
+const KEYMAP={ArrowUp:"up",KeyW:"up",ArrowDown:"down",KeyS:"down",ArrowLeft:"left",KeyA:"left",ArrowRight:"right",KeyD:"right"};
+window.addEventListener("keydown",e=>{
+  const tag=(e.target.tagName||"").toLowerCase();if(tag==="input"||tag==="select")return;
+  const k=KEYMAP[e.code];if(!k)return;e.preventDefault();S.keys[k]=true;if(S.auto)setAuto(false);
+});
+window.addEventListener("keyup",e=>{const k=KEYMAP[e.code];if(k)S.keys[k]=false;});
+window.addEventListener("blur",()=>{S.keys={};});
+document.querySelectorAll(".dpad button").forEach(b=>{
+  const k=KEYMAP[b.dataset.k];
+  b.addEventListener("pointerdown",e=>{e.preventDefault();S.keys[k]=true;if(S.auto)setAuto(false);});
+  for(const ev of ["pointerup","pointerleave","pointercancel"])b.addEventListener(ev,()=>{S.keys[k]=false;});
+});
+function toWorld(e){const r=cv.getBoundingClientRect();return {x:(e.clientX-r.left-S.view.ox)/S.view.sc,y:(e.clientY-r.top-S.view.oy)/S.view.sc};}
+function tagAt(p){let best=null,bd=14/S.view.sc;for(const t of S.tags){const d=Math.hypot(t.x-p.x,t.y-p.y);if(d<bd){bd=d;best=t.id;}}return best;}
+cv.addEventListener("pointerdown",e=>{const p=toWorld(e),id=tagAt(p);cv.focus();if(id==null)return;
+  const t=S.tags[id];S.drag={id,from:{x:t.x,y:t.y}};t.carried=true;cv.setPointerCapture(e.pointerId);cv.style.cursor="grabbing";draw();});
+cv.addEventListener("pointermove",e=>{const p=toWorld(e);
+  if(S.drag){const t=S.tags[S.drag.id];t.x=Math.min(S.tb.W-0.15,Math.max(0.15,p.x));t.y=Math.min(S.tb.H-0.15,Math.max(0.15,p.y));draw();return;}
+  const id=tagAt(p);if(id!==S.hover){S.hover=id;cv.style.cursor=id==null?"default":"grab";draw();}});
+function endDrag(){if(!S.drag)return;const t=S.tags[S.drag.id];t.carried=false;t.hist=[];
+  const moved=Math.hypot(t.x-S.drag.from.x,t.y-S.drag.from.y);S.drag=null;cv.style.cursor="grab";
+  if(moved>0.2){S.reloc++;
+    if(P.mode==="airloc"&&t.fixed)toast("You moved the fixed tag. The map origin stays where it was, so the whole map shifts against it. AirLoc requires one tag that never moves.");
+    else if(P.mode==="multilat")toast(`The survey is now stale for the ${t.label}. Multilateration keeps using its old position until you re-survey.`);
+    else if(P.airloc.version)toast(`The ${t.label} moved ${moved.toFixed(1)} m. Once new observations disagree with its landmark, versioning starts a new node and the old observations stay on the old one.`);
+    else toast(`The ${t.label} moved ${moved.toFixed(1)} m. As in the paper, its old observations stay on the same landmark, so the estimate shifts only as new observations outweigh them.`);}
+  updateStats();draw();}
+cv.addEventListener("pointerup",endDrag);cv.addEventListener("pointercancel",endDrag);
+cv.addEventListener("pointerleave",()=>{if(!S.drag&&S.hover!=null){S.hover=null;draw();}});
+let tt=null;function toast(m){const el=$("toast");el.textContent=m;el.hidden=false;clearTimeout(tt);tt=setTimeout(()=>el.hidden=true,5200);}
+
+/* ---------- controls ---------- */
+const NOTES={
+  multilat:"<b>Multilateration baseline</b>, as in [11]. Every tag sits at a surveyed position. At each step the phone ranges to the tags in range, keeps the k nearest, and multilaterates. Rings show each selected range around the surveyed position, drawn thicker where ranging is noisier. Drag a tag and its survey goes stale: multilateration keeps using the old position until you re-survey.",
+  airloc:"<b>AirLoc</b>. No tag position is known. One fixed tag anchors the map, and every other tag is a landmark that GraphSLAM estimates together with your trajectory from PDR, range, and bearing. By default the page runs the method as described in the paper: the full graph is kept and each tag has one landmark node. Observations are chosen k-nearest and weighted by 1/(d<sup>nd</sup> + a<sup>na</sup>); line opacity shows the weight. Purple diamonds are the estimated tag map. Drag a mobile tag to relocate it, then try the landmark versioning option to compare."
+};
+function setLegend(){
+  const items=[[`<span class="sw" style="background:var(--ink)"></span>True position`],[`<span class="sw" style="border:2px solid var(--accent)"></span>Estimate`]];
+  if(P.mode==="airloc")items.push([`<span class="sw" style="border:2px solid var(--fixed)"></span>Fixed tag`],[`<span class="sw" style="border:1.5px solid var(--ink)"></span>Mobile tag`],[`<span class="sw" style="background:var(--lm);border-radius:2px;transform:rotate(45deg);width:9px;height:9px"></span>Estimated tag`]);
+  else items.push([`<span class="sw" style="border:1.5px solid var(--ink)"></span>Tag`],[`<span class="sw" style="border:1.5px dashed var(--warn)"></span>Stale survey`]);
+  $("legend").innerHTML=items.map(i=>`<span>${i[0]}</span>`).join("");
+}
+function setMode(m){
+  P.mode=m;
+  document.querySelectorAll("#modeSeg button").forEach(b=>b.setAttribute("aria-pressed",b.dataset.mode===m));
+  document.querySelectorAll("[data-only]").forEach(el=>el.hidden=el.dataset.only!==m);
+  $("modeNote").innerHTML=NOTES[m];setLegend();resetRun();
+}
+function setAuto(on){S.auto=on;$("autoBtn").setAttribute("aria-pressed",on);$("autoBtn").textContent=on?"Stop walking":"Auto-walk";
+  if(on){const u=S.user,T=S.tb.tour;let bi=0,bd=1e9;T.forEach((p,i)=>{const d=Math.hypot(p[0]-u.x,p[1]-u.y);if(d<bd){bd=d;bi=i;}});S.tourIdx=bi;}}
+function setDims(){const tb=S.tb;$("dims").textContent=`${tb.W.toFixed(0)} × ${tb.H.toFixed(0)} m · ${Math.round(tb.W*tb.H)} m² · ${tb.rooms.length} room${tb.rooms.length>1?"s":""}`;}
+function newTestbed(){S.tb=makeTestbed(P.testbed);placeTags();setDims();resize();resetRun();}
+
+function bindRange(id,obj,key,fmt,onChange){const el=$(id),vl=$(id+"V");
+  const sync=()=>{if(vl)vl.textContent=fmt?fmt(obj[key]):obj[key];};
+  el.addEventListener("input",()=>{obj[key]=parseFloat(el.value);sync();onChange&&onChange();});
+  return ()=>{el.value=obj[key];sync();};}
+const syncs=[
+  bindRange("nTags",P,"ntags",null,()=>{placeTags();resetRun();}),
+  bindRange("uK",P.multilat,"k"),
+  bindRange("aK",P.airloc,"k"),bindRange("aNd",P.airloc,"nd"),bindRange("aNa",P.airloc,"na"),
+  bindRange("aDelta",P.airloc,"delta"),
+  bindRange("maxR",P,"maxR",v=>v+" m"),bindRange("noise",P,"noise",v=>v.toFixed(1)+"×"),
+];
+const selects=[["uSel",P.multilat,"sel"],["aSel",P.airloc,"sel"],["aWt",P.airloc,"wt"]];
+selects.forEach(([id,o,k])=>$(id).addEventListener("change",e=>{o[k]=e.target.value;}));
+[["nlos","nlos"],["rays","rays"],["trails","trails"]].forEach(([id,k])=>$(id).addEventListener("change",e=>{P[k]=e.target.checked;draw();}));
+$("aRobust").addEventListener("change",e=>{P.airloc.robust=e.target.checked;});
+$("aVersion").addEventListener("change",e=>{P.airloc.version=e.target.checked;resetRun();
+  toast(e.target.checked?"Landmark versioning on (planned fix, not in the paper). Run restarted.":"Back to the paper's method: one landmark node per tag. Run restarted.");});
+$("tbSel").addEventListener("change",e=>{P.testbed=e.target.value;setAuto(false);newTestbed();});
+$("newLayout").addEventListener("click",()=>{if(P.testbed!=="random"){P.testbed="random";$("tbSel").value="random";}setAuto(false);newTestbed();});
+$("shuffleBtn").addEventListener("click",()=>{placeTags();resetRun();});
+$("resetBtn").addEventListener("click",()=>{setAuto(false);resetRun();});
+$("autoBtn").addEventListener("click",()=>setAuto(!S.auto));
+$("resurvey").addEventListener("click",()=>{S.tags.forEach(t=>{t.sx=t.x;t.sy=t.y;});updateStats();draw();toast("Survey updated: multilateration now uses every tag's current position.");});
+$("defaults").addEventListener("click",()=>{
+  Object.assign(P.multilat,DEF_ML);Object.assign(P.airloc,DEF_AL);
+  Object.assign(P,{maxR:12,noise:1,nlos:true});
+  syncs.forEach(f=>f());selects.forEach(([id,o,k])=>$(id).value=o[k]);
+  $("aRobust").checked=false;$("aVersion").checked=false;$("nlos").checked=true;
+  resetRun();
+  toast("Paper defaults restored: multilateration k = 6 nearest; AirLoc k = 5 nearest, nd = 3, na = 4, full graph with one node per tag.");});
+document.querySelectorAll("#modeSeg button").forEach(b=>b.addEventListener("click",()=>{setAuto(false);setMode(b.dataset.mode);}));
+
+/* ---------- theme ---------- */
+const mq=window.matchMedia("(prefers-color-scheme: dark)");
+const retheme=()=>{readColors();draw();if(S.run)drawSpark();};
+mq.addEventListener?mq.addEventListener("change",retheme):mq.addListener(retheme);
+new MutationObserver(retheme).observe(document.documentElement,{attributes:true,attributeFilter:["data-theme"]});
+window.addEventListener("resize",()=>{resize();drawSpark();});
+
+/* ---------- boot ---------- */
+readColors();
+syncs.forEach(f=>f());
+S.tb=makeTestbed(P.testbed);placeTags();setDims();resize();
+setMode("airloc");
+setAuto(true);
+requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
